@@ -45,6 +45,10 @@ The script generates a certificate set for each client."""
 # Reference: https://docs.python.org/3/library/argparse.html
 import argparse
 #
+# Module for OO path handling.
+# https://docs.python.org/3/library/pathlib.html
+from pathlib import Path
+#
 # Module for the operating system interface.
 # https://docs.python.org/3/library/sys.html
 from sys import argv, exit
@@ -85,6 +89,9 @@ def main(commandLine):
         '--copies', default=1, type=int, help=
         'Create multiple copies of each certificate.'
         ' Each copy has its own private key. Default: 1.')
+    argumentParser.add_argument(
+        '--depot', metavar="DIRECTORY", type=Path, help=
+        'Override any computed depot name. Default is to base the depot directory name on the domain.')
     argumentParser.add_argument(
         '-d', '--domain', default="example.com", type=str, help=
         'Internet domain to append to any client names that ' "aren't" ' email'

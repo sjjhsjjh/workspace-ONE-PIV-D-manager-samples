@@ -10,6 +10,11 @@
 #
 # Standard library imports, in alphabetic order.
 #
+# Email address parser.
+# https://docs.python.org/3/library/email.headerregistry.html#email.headerregistry.Address
+from email.headerregistry import Address
+from email.errors import InvalidHeaderDefect
+#
 # Module for OO path handling.
 # https://docs.python.org/3/library/pathlib.html
 from pathlib import Path
@@ -31,8 +36,6 @@ from sys import stderr, exit
 #
 from certauth.certificate_purpose import CertificatePurpose
 from certauth.certificate_configuration import CertificateConfiguration
-
-atSign = "@"
 
 class CertificateAuthority(CertificateConfiguration):
 
@@ -68,6 +71,14 @@ class CertificateAuthority(CertificateConfiguration):
         self._create = create
 
     @property
+    def depot(self):
+        return self._depot
+    @depot.setter
+    def depot(self, depot):
+        self._depot = depot
+        self._setComputedProperties()
+
+    @property
     def domain(self):
         return self._domain
     @domain.setter
@@ -99,15 +110,13 @@ class CertificateAuthority(CertificateConfiguration):
     # End of computed properties.
 
     def _setComputedProperties(self):
-        # try:
-        #     self._depotPath = Path(self._depot)
-        # except AttributeError:
-        #     pass
-        
-        try:
-            self._depotPath = Path(self._domain)
-        except AttributeError:
-            pass
+        if self.depot is None:
+            try:
+                self._depotPath = Path(self._domain)
+            except AttributeError:
+                pass
+        else:
+            self._depotPath = Path(self.depot)
 
         try:
             authorityStem = Path(self._depotPath, self._authorityStem).resolve()
@@ -136,7 +145,10 @@ class CertificateAuthority(CertificateConfiguration):
 
         print(f'Creating depot directory "{self.depotPath.resolve()}"')
         self.depotPath.mkdir(parents=True)
-        commonName = f'{self.authorityStem}.{self.domain}'
+        commonName = ".".join((
+            segment for segment in (self.authorityStem, self.domain)
+            if segment != ""
+        ))
 
         # https://www.ibm.com/docs/en/ibm-mq/7.5?topic=certificates-distinguished-names
         caCertCompleted = subprocess.run([
@@ -208,11 +220,27 @@ class CertificateAuthority(CertificateConfiguration):
         ], input=chainPEM, text=True)
         print(forClient + f'export {clientExportCompleted.returncode}.')
 
-    def _client_name_and_email(self, client):
-        (clientName, clientAt, clientDomain) = client.partition(atSign)
-        email = "".join((
-            clientName, atSign, self.domain)) if clientAt == "" else client
-        return clientName, email
+    def _client_name_and_address(self, client):
+        try:
+            # Attempt to parse the client specifier as an email address. If it
+            # parses, return the username part as the client name and the whole
+            # specifier as the address.
+            return Address(addr_spec=client).username, client
+        except InvalidHeaderDefect:
+            pass
+        
+        # If the client specifier isn't an email address, return it as the name.
+        # The address depends on the domain setting.
+        #
+        # -   If an empty domain has been set, return the bare client specifier
+        #     as the address. It will have to be a server name or IP address.
+        #
+        # -   Otherwise, assemble an email address from the client specifier as
+        #     the username and the domain.
+        #
+        return client, (
+            client if self.domain == "" else
+            Address(username=client, domain=self.domain).addr_spec)
 
     def __call__(self):
         if self.create:
@@ -236,9 +264,9 @@ class CertificateAuthority(CertificateConfiguration):
                 else:
                     print('Creating certificate' + tail)
 
-            clientName, email = self._client_name_and_email(client)
+            clientName, address = self._client_name_and_address(client)
             for cnfPath in self.write_client_CNFs(
-                self.depotPath, clientName, email
+                self.depotPath, clientName, address
             ):
                 if self.copies <= 1:
                     self.createClient(clientName, cnfPath, "")
