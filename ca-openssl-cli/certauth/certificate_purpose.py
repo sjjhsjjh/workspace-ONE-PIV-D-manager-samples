@@ -20,6 +20,7 @@ class KeyUsage(Enum):
     nonRepudiation = auto()
     digitalSignature = auto()
     emailProtection = auto()
+    serverAuth = auto()
 
 # Some handy pages for key usage values.
 #
@@ -29,12 +30,15 @@ class KeyUsage(Enum):
 
 class CertificatePurpose(Enum):
 
-    def __init__(self, keyUsages, extendedKeyUsages, humanSuffix=None):
+    def __init__(
+        self, keyUsages, extendedKeyUsages, humanSuffix=None, default=True
+    ):
         self.keyUsages = tuple(
             keyUsage.name for keyUsage in keyUsages)
         self.extendedKeyUsages = tuple(
             extendedKeyUsage.name for extendedKeyUsage in extendedKeyUsages)
         self.humanSuffix = self.name[:4] if humanSuffix is None else humanSuffix
+        self.default = default
 
     Authentication = ((
         # KeyUsage.critical, 
@@ -58,13 +62,21 @@ class CertificatePurpose(Enum):
         KeyUsage.emailProtection,
     ))
 
+    # TOTH configuration for server certificates.
+    # https://www.golinuxcloud.com/openssl-create-client-server-certificate/
+    Server = ((
+        KeyUsage.digitalSignature, KeyUsage.keyEncipherment
+    ), (
+        KeyUsage.serverAuth,
+    ), None, False)
+
     @classmethod
-    def all(cls):
-        return tuple(purpose for purpose in cls)
+    def defaults(cls):
+        return tuple(purpose for purpose in cls if purpose.default)
 
     @classmethod
     def humanSuffixes(cls):
-        return "".join(purpose.humanSuffix for purpose in cls.all())
+        return "".join(purpose.humanSuffix for purpose in cls.defaults())
 
     @staticmethod
     def suffix(purposes):
@@ -99,6 +111,8 @@ class CertificatePurpose(Enum):
     @classmethod
     def parsePurposesSpecifier(cls, specifier):
         shortForm = cls.short_form(specifier)
+        if specifier == cls.Server.name:
+            return specifier, [[cls.Server,],], True, ["Server special case."]
         certificates = []
         reports = []
         ok = None
