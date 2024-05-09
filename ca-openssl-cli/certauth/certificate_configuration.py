@@ -9,10 +9,21 @@
 #
 # Standard library imports, in alphabetic order.
 #
+# Email address parser, only used to identify email addresses.
+# https://docs.python.org/3/library/email.headerregistry.html#email.headerregistry.Address
+from email.headerregistry import Address
+from email.errors import InvalidHeaderDefect
+#
+# Internet Protocol (IP) address parser. Only used to identify IP addresses.
+# https://docs.python.org/3/library/ipaddress.html#ipaddress.ip_interface
+from ipaddress import ip_interface
+#
 # Module for OO path handling.
 # https://docs.python.org/3/library/pathlib.html
 from pathlib import Path
-
+#
+# Local imports.
+#
 from certauth.certificate_purpose import CertificatePurpose
 
 class CertificateConfiguration:
@@ -69,7 +80,7 @@ class CertificateConfiguration:
 
     # End of computer property.
 
-    def _write_one_CNF(self, cnfPath, email, purposes):
+    def _write_one_CNF(self, cnfPath, address, purposes):
         # TOTH
         #
         # CNF file:
@@ -90,7 +101,7 @@ class CertificateConfiguration:
         # https://sockettools.com/kb/creating-certificate-using-openssl/
         # https://www.openssl.org/docs/manmaster/man5/x509v3_config.html
 
-        emailCNF = email.replace('#', '\#')
+        addressCNF = address.replace('#', '\#')
 
         keyUsages = []
         extendedKeyUsages = []
@@ -112,9 +123,12 @@ class CertificateConfiguration:
                 'extendedKeyUsage = ', (", ".join(extendedKeyUsages)), "\n"
             ))
         )
+        alternativeNames = "\n".join(
+            name
+            for name in self._subject_alternative_names(address, addressCNF)
+        )
 
-        if email != emailCNF:
-            print(f'CNF email "{emailCNF}"')
+        if address != addressCNF: print(f'CNF address "{addressCNF}"')
         cnfPath.write_text(f'''# Written by certauth module.
 basicConstraints = CA:FALSE
 subjectKeyIdentifier = hash
@@ -122,8 +136,7 @@ authorityKeyIdentifier = keyid,issuer
 subjectAltName = @alt_names
 {keyUsagesCNF}{extendedKeyUsagesCNF}
 [alt_names]
-otherName = 1.3.6.1.4.1.311.20.2.3;UTF8:{emailCNF}
-email = {emailCNF}
+{alternativeNames}
 
 [req]
 prompt = no
@@ -134,11 +147,11 @@ req_extensions = req_extensions
 subjectAltName = @alt_names
 {keyUsagesCNF}{extendedKeyUsagesCNF}
 [distinguished_names]
-commonName = {emailCNF}
+commonName = {addressCNF}
 countryName = {self.countryCode}
 stateOrProvinceName = {self.stateName}
 localityName = {self.localityName}
-emailAddress = {emailCNF}
+emailAddress = {addressCNF}
 organizationName = {self.organisationName}
 organizationalUnitName = {self.organisationalUnitName}
 '''
@@ -149,8 +162,28 @@ organizationalUnitName = {self.organisationalUnitName}
         )
 
         return cnfPath
+    
+    def _subject_alternative_names(self, address, addressCNF):
+        isEmail = True
+        try:
+            _ = Address(addr_spec=address)
+        except InvalidHeaderDefect:
+            isEmail = False
 
-    def write_client_CNFs(self, depotPath, clientName, email):
+        if isEmail:
+            yield f'otherName = 1.3.6.1.4.1.311.20.2.3;UTF8:{addressCNF}'
+            yield f'email = {addressCNF}'
+            return
+        
+        nameType = "IP"
+        try:
+            _ = ip_interface(address)
+        except ValueError:
+            nameType = "DNS"
+
+        yield f'{nameType} = {addressCNF}'
+
+    def write_client_CNFs(self, depotPath, clientName, address):
         # On the next line
         #
         # -   humanSuffixes() is the default of all purposes.
@@ -171,7 +204,7 @@ organizationalUnitName = {self.organisationalUnitName}
             cnfPath = Path(
                 depotPath, "".join((clientName, suffix, ".dummySuffix"))
             ).resolve().with_suffix(".cnf")
-            yield self._write_one_CNF(cnfPath, email, purposes)
+            yield self._write_one_CNF(cnfPath, address, purposes)
 
     def parsePurposesSpecifier(self):
         shortForm, certificates, ok, reports = (
